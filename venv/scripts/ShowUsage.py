@@ -1,9 +1,12 @@
 # usage:
 #   cd python_projects/focus_reporting/venv/scripts
-#   python3 ShowUsage.py -rpt USAGE -g HOURLY -ds 2024-08-01 -de 2024-08-21 -csv
+#   python3 /home/opc/python_projects/focus_reporting/venv/scripts/ShowUsage.py -qrt USAGE -freq REGULAR_WEEKLY -csv
+#   python3 /home/opc/python_projects/focus_reporting/venv/scripts/ShowUsage.py -qrt USAGE -freq ADHOC -g HOURLY -ds 2024-08-01 -de 2024-08-21 -csv
 
 import os
 import sys
+import subprocess
+import shutil
 import pytz
 from pathlib import Path
 import argparse
@@ -65,7 +68,7 @@ g_TimeUsageEnded = None
 g_isCSV = False
 g_csvFolder = os.path.join ( os.path.expanduser('~'), "python_projects/focus_reporting/save" )
 g_csvFilePath = ""
-g_csvFileName = "usage_hourly"
+g_csvFileName = ""
 #endregion
 
 #region email-related parameters #
@@ -78,7 +81,7 @@ g_SmtpUser = "marek.prochyra@aspecta.sk"          # email address of SMTP user
 g_SmtpPassword = "MarkOnIS73"                     # email password of SMTP user or app-specific password
 
 g_SmtpUserSendGrid = "apikey"
-g_SmtpPasswordSendGrid = "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"  # email password of SMTP user or app-specific password
+g_SmtpPasswordSendGrid = "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"  # email password of SMTP user or app-specific password
 
 g_SmtpUserOCI = "ocid1.user.oc1..aaaaaaaaere3lplxkfvgqndsd5len33gsyninkqhdj25ukbrh5bklwn2nsma@ocid1.tenancy.oc1..aaaaaaaagkhw5j4cxtlzb7c7g5efapzma4wdymyqaiij2ouuarg74cvruc2q.m7.com"
 g_SmtpPasswordOCI = "<nkqwh2f&F{L6<7rz$}v"
@@ -123,13 +126,24 @@ def valid_date_type ( arg_date_str ):
 def fn_IsInputValid ( p_CmdlnArgs ):
     
     l_isInputValid = True
+    l_TimeUsageStarted = None
+    l_TimeUsageEnded = None    
+
+    print ( g_Frequency )
+
+    l_lst_freq = ['REGULAR_WEEKLY', 'REGULAR_MONTHLY', 'ADHOC' ]
+    if g_Frequency not in l_lst_freq: 
+      print ( "Frequency not valid" )
+      return False
 
     # set start date as 1st of previous month, end date as current date ( = 1st of current month )
     # note: [start, end ] = [ 1st of prev_month, 1st of curr_month ] 
-    if g_Frequency == "REGULAR_MONTH":
+    if g_Frequency == "REGULAR_MONTHLY":
 
       # get last successfully extracted date as start date ( midnight ) for monthly extraction      
-      l_last_saved_date = datetime.strptime ( os.environ [ 'LAST_SAVED_DATE' ], '%Y-%m-%d' )
+      with open ( "/home/opc/python_projects/focus_reporting/venv/scripts/last_saved_date.txt", 'r' ) as f:
+        l_last_saved_date = datetime.strptime ( f.read().strip(), '%Y-%m-%d' )
+
       l_TimeUsageStarted = l_last_saved_date.replace ( hour=0, minute=0, second=0, microsecond=0 )
       
       # set today ( 1st of new month ) as END date at midnight
@@ -146,11 +160,11 @@ def fn_IsInputValid ( p_CmdlnArgs ):
 
     # set START date as 1st of current month, END date as current day ( = Monday )
     # note: if today ( = monday ) = 1st of month => process will not run
-    elif g_Frequency == "REGULAR_WEEK":
+    elif g_Frequency == "REGULAR_WEEKLY":
       #region set START / END dates
 
       # check if today is Monday 1st of month => ERROR
-      if ( datetime.now().strftime('%A') == 'Monday' and datetime.now().day == 1 ): 
+      if not ( datetime.now().strftime('%A') == 'Monday' and datetime.now().day == 1 ): 
         return False
 
       else: # OK => set START / END dates
@@ -182,11 +196,19 @@ def fn_IsInputValid ( p_CmdlnArgs ):
 
       else:
         l_TimeUsageEnded = l_TimeUsageStarted + datetime.timedelta ( days=1 )
+
+        # check for max. days allowed for monhtly / yearly data range
+        days = ( l_TimeUsageEnded - l_TimeUsageStarted ).days
+
+        if days > 93 and p_CmdlnArgs.granularity == 'DAILY':
+          print ( "\n!!! Error, Max 93 days period allowed for DAILY, input is " + str(days) + " days, !!!" )
+          return False
+
+        if days > 366 and p_CmdlnArgs.granularity == 'MONTHLY':
+          print ( "\n!!! Error, Max 366 days period allowed for MONTHLY, input is " + str(days) + " days, !!!" )
+          return False        
     #endregion
 
-
-    # print (f"start: {l_TimeUsageStarted}, end: {l_TimeUsageEnded}" )
-    # sys.exit()
 
     # set final start and end dates
     global g_TimeUsageStarted
@@ -199,16 +221,7 @@ def fn_IsInputValid ( p_CmdlnArgs ):
     global g_ActualMonth
     g_ActualMonth = g_TimeUsageStarted.strftime ('%Y-%m-%d') [:7].replace ( '-', '_' )
 
-    # check for max. days allowed for monhtly / yearly data range
-    days = ( g_TimeUsageEnded - g_TimeUsageStarted ).days
-
-    if days > 93 and p_CmdlnArgs.granularity == 'DAILY':
-        print ( "\n!!! Error, Max 93 days period allowed for DAILY, input is " + str(days) + " days, !!!" )
-        return False
-
-    if days > 366 and p_CmdlnArgs.granularity == 'MONTHLY':
-        print ( "\n!!! Error, Max 366 days period allowed for MONTHLY, input is " + str(days) + " days, !!!" )
-        return False
+    #print (f"l_last_saved_date: {l_last_saved_date}, actual month: {g_ActualMonth}, start: {g_TimeUsageStarted}, end: {g_TimeUsageEnded}" )
 
     return l_isInputValid
 
@@ -228,9 +241,6 @@ def fn_GetUsageClient():
 # main function for data retrieval
 ############################################
 def fn_GetUsageData ( p_DateTimeStarted, p_DateTimeEnded ):
-
-  # print ( f"g_TimeUsageStarted: {g_TimeUsageStarted.strftime ( '%Y-%m-%dT%H:%M:%SZ' )}, g_TimeUsageEnded: {g_TimeUsageEnded.strftime ( '%Y-%m-%dT%H:%M:%SZ' )}" )
-  # print ( f"From: {p_DateTimeStarted.strftime ( '%Y-%m-%dT%H:%M:%SZ' )}, to: {p_DateTimeEnded.strftime ( '%Y-%m-%dT%H:%M:%SZ' )}")
 
   try:
     # oci.usage_api.models.RequestSummarizedUsagesDetails
@@ -701,6 +711,59 @@ def fn_SendMail_SendGridApp():
 
 
 ##########################################################################
+# push CSV into GitHub
+##########################################################################
+def fn_CommitCSVToGitHub():
+  
+  #local function that executes Git commands
+  def fn_RunGitCommand ( s_command ):
+    #Run a shell command and return the output.
+    try:
+      l_result = subprocess.run ( s_command, shell=True, universal_newlines=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+      # if l_result.returncode != 0:
+      #   print(f"Error: {l_result.stderr}", file=sys.stderr)
+      #   sys.exit(l_result.returncode)
+
+    except Exception as e:
+      print ( f"Error in fn_CommitCSVToGitHub(): {e}" )
+
+    return l_result.stdout
+
+  ####################################################
+  ### MAIN PART of function fn_CommitCSVToGitHub() ###
+  ####################################################
+
+  # l_repo_path = '/home/opc/python_projects/focus_reporting'
+  # l_save_subfolder = 'save'
+  # l_local_csv_path = f"/home/opc/python_projects/focus_reporting/save/{g_csvFileName}"
+  
+  l_repo_path = '/home/opc/python_projects/focus_reporting'
+  l_destination_csv_path = os.path.join ( "/home/opc/python_projects/focus_reporting/save", g_csvFileName )  # destination path in repo
+
+  # navigate to the repository directory
+  os.chdir ( l_repo_path )
+
+  try:
+    # add the file(s) to the staging area
+    print ( f"Adding CSV file {l_destination_csv_path} to the staging area..." )
+
+    l_action = "stage"
+    fn_RunGitCommand ( f'git add /home/opc/python_projects/focus_reporting/save/{g_csvFileName}')
+
+    # Commit the changes
+    print ( f"Committing changes with message: Add new CSV file to save subfolder" )
+    l_action = "commit"
+    fn_RunGitCommand ( f'git commit -m "Add CSV file to save subfolder"' )
+
+    # Push changes to GitHub
+    print ( f"Pushing changes to branch: master" )
+    l_action = "push"
+    fn_RunGitCommand ( f'git push origin master' )
+    
+  except Exception as e:
+    print ( f"Error in fn_CommitCSVToGitHub(): l_action = {l_action} : Error: {e}" )
+
+##########################################################################
 # Main Process
 ##########################################################################
 def fn_Main():
@@ -712,8 +775,6 @@ def fn_Main():
           # 2) WEEKLY processing on Monday = 1st of new month => MONTHLY process at the same day will cover this
   def fn_ProcessInputParams():
     l_arr_ReportType = ['ALL', 'DATE', 'SERVICE', 'PRODUCT', 'REGION', 'RESOURCE', 'SPECIAL', 'TENANT', 'COMPARTMENT']
-    l_arr_Frequency = ['REGULAR', 'ADHOC']  # REGULAR = each monday with HOURLY granularity, ADHOC = anytime
-    l_arr_Granularity = ['HOURLY', 'DAILY', 'MONTHLY']
 
     #region get Command Line Parser
     parser = argparse.ArgumentParser ( usage=argparse.SUPPRESS, formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=80, width=150 ))
@@ -726,7 +787,7 @@ def fn_Main():
     parser.add_argument ( "-report", default="ALL", dest='report', help="Report Type = " + ' / '.join(x for x in l_arr_ReportType) + " ( Default = ALL )" )
     parser.add_argument ( "-qrt", default="USAGE", dest='query_type', help="USAGE, COST (Default USAGE)" )
     parser.add_argument ( "-g", default="DAILY", dest='granularity', help="Granularity HOURLY, DAILY or MONTHLY (Default DAILY)" )
-    parser.add_argument ('-freq', default='REGULAR', dest='frequency', help="Report frequency REGULAR or ADHOC (Default REGULAR)")
+    parser.add_argument ('-freq', default='REGULAR_WEEKLY', dest='frequency', help="Report frequency REGULAR_WEEKLY, REGULAR_MONTHLY or ADHOC (Default REGULAR_WEEKLY)")
      
     parser.add_argument ( "-ds", default=None, dest='date_start', help="Start Date - format YYYY-MM-DD", type=valid_date_type )
     parser.add_argument ( "-de", default=None, dest='date_end', help="End Date - format YYYY-MM-DD, (Not Inclusive)", type=valid_date_type )
@@ -765,7 +826,9 @@ def fn_Main():
   #################################
   
   # if input parameters are OK => START / END dates of extraction are set
-  if fn_ProcessInputParams() == False: sys.exit()
+  if fn_ProcessInputParams() == False: 
+    print ( "Incorrect input parameters !")
+    sys.exit()
     
   # all is OK => continue
 
@@ -788,21 +851,24 @@ def fn_Main():
   ### III.print or save data based on input parameters
   fn_PrintSaveData ( l_UsageData )  
 
-  # store WEEKLY_PROCESS END DATE into system variable for next extraction
-  # Note: since extraction end date takes D-1 data, this variable will be used as START DATE for monthly extraction process
-  os.environ['LAST_SAVED_DATE'] = datetime.now().strftime('%Y-%m-%d')
+  # store WEEKLY_PROCESS END DATE into file for next extraction
+  # Note: since extraction end date takes D-1 data, this date will be used as START DATE for monthly extraction process  
+  with open("/home/opc/python_projects/focus_reporting/venv/scripts/last_saved_date.txt", 'w') as f:
+    f.write(datetime.now().strftime('%Y-%m-%d'))
 
 
   ### IV. send email on 1st of each month
   if datetime.now().day == 1: fn_SendMail_SendGridApp ()
 
 
+  ### V. commit CSV to GitHub
+  fn_CommitCSVToGitHub()
+
+
 ##########################################################################
 # Main Process
 ##########################################################################  
 
-os.environ['LAST_SAVED_DATE'] = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-print (os.environ['LAST_SAVED_DATE'])
-
 fn_Main()
 print ( "Process has finished successfully" )
+
