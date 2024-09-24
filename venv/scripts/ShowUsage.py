@@ -164,7 +164,7 @@ def fn_IsInputValid ( p_CmdlnArgs ):
       #region set START / END dates
 
       # check if today is Monday 1st of month => ERROR
-      if not ( datetime.now().strftime('%A') == 'Monday' and datetime.now().day == 1 ): 
+      if ( datetime.now().strftime('%A') == 'Monday' and datetime.now().day == 1 ): 
         return False
 
       else: # OK => set START / END dates
@@ -750,6 +750,7 @@ def fn_CommitCSVToGitHub():
     l_action = "stage"
     fn_RunGitCommand ( f'git add /home/opc/python_projects/focus_reporting/save/{g_csvFileName}')
 
+    
     # Commit the changes
     print ( f"Committing changes with message: Add new CSV file to save subfolder" )
     l_action = "commit"
@@ -871,4 +872,3 @@ def fn_Main():
 
 fn_Main()
 print ( "Process has finished successfully" )
-
