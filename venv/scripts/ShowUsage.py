@@ -136,8 +136,8 @@ def fn_IsInputValid ( p_CmdlnArgs ):
       print ( "Frequency not valid" )
       return False
 
-    # set start date as 1st of previous month, end date as current date ( = 1st of current month )
-    # note: [start, end ] = [ 1st of prev_month, 1st of curr_month ] 
+    # set start date as last extracted date from previous month, end date as current date ( = 1st of current month )
+    # note: [start, end ] = [ last extracted date of prev_month, 1st of curr_month ] 
     if g_Frequency == "REGULAR_MONTHLY":
 
       # get last successfully extracted date as start date ( midnight ) for monthly extraction      
