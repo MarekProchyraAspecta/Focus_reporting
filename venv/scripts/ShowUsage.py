@@ -2,7 +2,7 @@
 #   cd python_projects/focus_reporting/venv/scripts
 #   python3 /home/opc/python_projects/focus_reporting/venv/scripts/ShowUsage.py -qrt USAGE -freq REGULAR_WEEKLY -g HOURLY -csv
 #   python3 /home/opc/python_projects/focus_reporting/venv/scripts/ShowUsage.py -qrt USAGE -freq REGULAR_MONTHLY -g HOURLY -csv
-#   python3 /home/opc/python_projects/focus_reporting/venv/scripts/ShowUsage.py -qrt USAGE -freq ADHOC -g HOURLY -ds 2026-02-15 -de 2026-03-01 -csv
+#   python3 /home/opc/python_projects/focus_reporting/venv/scripts/ShowUsage.py -qrt USAGE -freq ADHOC -g HOURLY -ds 2024-08-01 -de 2024-08-21 -csv
 
 import os
 import sys
@@ -44,16 +44,16 @@ g_TenantID_dest = "ocid1.tenancy.oc1..aaaaaaaadbn4d7ald33gyfgtd7wv5gexwv4lnoftbg
 g_Config_source = {
   'user': 'ocid1.user.oc1..aaaaaaaatwfmlfw57qheletbzriaom4zmhkgfaa2mb5rfzqzr4lbdsle4olq',       #marek.prochyra@aspecta.sk
   'key_file': '~/.oci/keys/aspecta_private_key.pem',                                            #private key in tenant "aspectask"
-  'fingerprint': 'c8:3c:0b:4b:92:f1:e6:fb:0c:87:9b:2a:16:87:3a:89',                             #fingerprint in tenant "aspectask"
-  'tenancy': g_TenantID_source,                                                                 #aspectask
+  'fingerprint': 'c8:3c:0b:4b:92:f1:e6:fb:0c:87:9b:2a:16:87:3a:89',                             #fingerprint in tenant "socialnapoistovna"
+  'tenancy': g_TenantID_source,                                                                        #socialnapoistovna
   'region': 'eu-frankfurt-1'
 }
 
 g_Config_dest = {
   'user': 'ocid1.user.oc1..aaaaaaaatwfmlfw57qheletbzriaom4zmhkgfaa2mb5rfzqzr4lbdsle4olq',       #marek.prochyra@aspecta.sk
-  'key_file': '~/.oci/keys/aspecta_private_key.pem',                                            #private key in tenant "socialnapoistovna"
+  'key_file': '~/.oci/keys/aspecta_private_key.pem',                                            #private key in tenant "aspectask"
   'fingerprint': 'c8:3c:0b:4b:92:f1:e6:fb:0c:87:9b:2a:16:87:3a:89',                             #fingerprint in tenant "socialnapoistovna"
-  'tenancy': g_TenantID_dest,                                                                   #socialnapoistovna
+  'tenancy': g_TenantID_dest,                                                                        #socialnapoistovna
   'region': 'eu-frankfurt-1'
 }
 
@@ -299,152 +299,228 @@ def fn_GetData_Main ():
     raise RuntimeError ( "\nError in fn_GetData() function: " + str(e) )
   
 ##########################################################################
-# load VM clusters
-##########################################################################
-def fn_LoadVmClusters ( l_database_client ):
-    """
-    Loads all VM Clusters once and returns a dictionary:
-    { vm_cluster_id : vm_cluster_object }
-    """
-    vm_clusters = l_database_client.list_vm_clusters(g_TenantID_dest).data
-    return {c.id: c for c in vm_clusters}
-  
-##########################################################################
 # print or save data
 ##########################################################################
-def fn_PrintSaveData(p_UsageData):
+def fn_PrintSaveData ( p_UsageData ):
+  # programmatically filter the response by service types
+  if g_Granularity == "HOURLY":
+    l_FilteredData = [ item for item in p_UsageData 
+    if item.sku_name in [ "Database Exadata Cloud at Customer - Database OCPU" ]
+      and not item.resource_id.startswith("ocid1.pluggabledatabase")]
+    #print ( p_UsageData )
 
-    # FILTER relevant items
-    if g_Granularity == "HOURLY":
-        l_FilteredData = [
-            item for item in p_UsageData
-            if item.sku_name == "Database Exadata Cloud at Customer - Database OCPU"
-            and not item.resource_id.startswith("ocid1.pluggabledatabase")
-        ]
-    else:
-        l_FilteredData = [
-            item for item in p_UsageData.data.items
-            if item.sku_name == "Database Exadata Cloud at Customer - Database OCPU"
-            and not item.resource_id.startswith("ocid1.pluggabledatabase")
-        ]
+  else:
+    l_FilteredData = [ item for item in p_UsageData.data.items 
+    if item.sku_name in [ "Database Exadata Cloud at Customer - Database OCPU" ]
+      and not item.resource_id.startswith("ocid1.pluggabledatabase")]
+    #print ( p_UsageData.data )
+  
+  l_FilteredData.sort ( key = lambda x: ( x.ad, x.time_usage_started ) )
+  #print ( l_FilteredData )
 
-    l_FilteredData.sort(key=lambda x: (x.ad, x.time_usage_started))
-
-    # COLUMN HEADERS
-    headers = [
-        "environment", "time_usage_started", "time_usage_ended",
-        "resourceId", "availability_domain", "VCN",
-        "service", "sku_name", "sku_part_number",
-        "computed_amount", "computed_quantity", "currency"
-    ]
-
-    # INIT database client + load VM clusters ONCE
-    l_database_client = oci.database.DatabaseClient(g_Config_dest)
-    vm_cluster_cache = fn_LoadVmClusters(l_database_client)
-
-    # CSV MODE
-    if g_isCSV:
-        file_mode = "a" if g_Frequency == "REGULAR_MONTH" else "w"
-
-        with open(g_csvFilePath, file_mode, newline='') as f:
-            writer = csv.writer(f)
-
-            # Write header only in non-monthly mode
-            if g_Frequency != "REGULAR_MONTH":
-                writer.writerow(headers)
-
-            for item in l_FilteredData:
-
-                vcn_display_name = ""
-                vcn_ad = ""
-                environment = ""
-
-                if item.resource_id.startswith("ocid1.vmcluster"):
-                    vmc = vm_cluster_cache.get(item.resource_id)
-
-                    if vmc:
-                        vcn_display_name = vmc.display_name or ""
-                        vcn_ad = vmc.availability_domain or ""
-
-                        # AUTO DETECT ENVIRONMENT
-                        if "tqvm" in vcn_display_name.lower():
-                            environment = "TEST"
-                        elif "pqvm" in vcn_display_name.lower():
-                            environment = "PROD"
-
-                # WRITE ROW
-                writer.writerow([
-                    environment,
-                    str(item.time_usage_started),
-                    str(item.time_usage_ended),
-                    item.resource_id,
-                    vcn_ad,
-                    vcn_display_name,
-                    item.service,
-                    item.sku_name,
-                    item.sku_part_number,
-                    str(item.computed_amount),
-                    str(item.computed_quantity),
-                    item.currency
-                ])
-
-        return  # DONE (CSV MODE)
+  # define column headers
+  l_lst_Headers = [ "environment", "time_usage_started", "time_usage_ended", "resourceId", "availability_domain", "VCN", "service", "sku_name", "sku_part_number", "computed_amount", "computed_quantity", "currency" ]   
 
 
-    # SCREEN OUTPUT MODE
-    # compute widths
-    col_widths = [len(h) for h in headers]
-    rows = []
+  #get virtual cluster network (VCN) detail ( PROD / TEST ) based on its resource_id
+  l_database_client = oci.database.DatabaseClient ( g_Config_dest )
 
-    for item in l_FilteredData:
-        vcn_display_name = ""
-        vcn_ad = ""
-        environment = ""
+   # save data into file
+  if g_isCSV:        
+        
+    # in WEEKLY process data is overwritten, in MONTHLY process the last remaining data until end of month are appended
+    l_file_mode = "a" if ( g_Frequency == "REGULAR_MONTH" ) else "w"
 
-        if item.resource_id.startswith("ocid1.vmcluster"):
-            vmc = vm_cluster_cache.get(item.resource_id)
+    with open ( g_csvFilePath, l_file_mode, newline='' ) as l_file:
+      l_writer = csv.writer ( l_file )
 
-            if vmc:
-                vcn_display_name = vmc.display_name or ""
-                vcn_ad = vmc.availability_domain or ""
+      # in WEEKLY process add header as first line
+      if ( g_Frequency != "REGULAR_MONTH" ): l_writer.writerow ( l_lst_Headers )
 
-                if "tqvm" in vcn_display_name.lower():
-                    environment = "TEST"
-                elif "pqvm" in vcn_display_name.lower():
-                    environment = "PROD"
+      for l_item in l_FilteredData:
 
-        row = [
-            environment,
-            str(item.time_usage_started),
-            str(item.time_usage_ended),
-            item.resource_id,
-            vcn_ad,
-            vcn_display_name,
-            item.service,
-            item.sku_name,
-            item.sku_part_number,
-            str(item.computed_amount),
-            str(item.computed_quantity),
-            item.currency
-        ]
+        l_VCN = None
+        l_VCN_avail_domain = ""
+        l_VCN_display_name = ""
+                
+        if l_item.resource_id.startswith("ocid1.vmcluster"):
+          # if the resource_id is a VM cluster
+          l_VCN = l_database_client.get_vm_cluster ( l_item.resource_id ).data
 
-        rows.append(row)
+          # in case vm cluster exists get it's properties
+          if (l_VCN):
+            l_VCN_avail_domain = l_VCN.availability_domain
+            l_VCN_display_name = l_VCN.display_name
+            
+        # check for other resource types            
+        # elif l_item.resource_id.startswith("ocid1.pluggabledatabase"):
+          # if the resource_id is a pluggable database
+          # l_VCN = l_database_client.get_pluggable_database ( l_item.resource_id ).data
 
-        # update col widths
-        for i, val in enumerate(row):
-            col_widths[i] = max(col_widths[i], len(val))
+          # print (l_VCN)
+        # else:
+          #print("Unknown resource type.")
 
-    # format output
-    def fmt(row):
-        return " | ".join(val.ljust(col_widths[i]) for i, val in enumerate(row))
+        if   "tqvm" in l_VCN_display_name: l_environment = "TEST" 
+        elif "pqvm" in l_VCN_display_name: l_environment = "PROD" 
+        else: l_environment = ""
+          
+        # directly write each row to CSV
+        l_row = [
+          l_environment,
+          str ( l_item.time_usage_started ),
+          str ( l_item.time_usage_ended ),
 
-    print(fmt(headers))
-    print("-" * (sum(col_widths) + 3 * len(col_widths)))
+          l_item.resource_id,
+          l_VCN_avail_domain,
+          l_VCN_display_name,    
+          l_item.service, 
+          l_item.sku_name,
+          l_item.sku_part_number,
+          str ( l_item.computed_amount ),
+          str ( l_item.computed_quantity ),
+          l_item.currency
+        ] 
 
-    for r in rows:
-      print(fmt(r))
+        l_writer.writerow ( l_row )
+        #print ( l_row )
 
 
+  else: # print to screen
+
+    # Determine the width of each column
+    col_widths = [max ( len ( header ) for header in l_lst_Headers )] * len ( l_lst_Headers )
+
+    # format the header
+    l_lst_FormattedHeader = " | ".join ( l_header.ljust ( col_widths[i] ) for i, l_header in enumerate ( l_lst_Headers ))
+    l_arr_FormattedRows = [ l_lst_FormattedHeader ]
+    l_arr_FormattedRows.append ( "-" * len ( l_lst_FormattedHeader ))
+
+
+    # format each row
+    for l_item in l_FilteredData:
+      
+      l_VCN = None
+      l_VCN_avail_domain = ""
+      l_VCN_display_name = ""
+              
+      if l_item.resource_id.startswith("ocid1.vmcluster"):
+        # if the resource_id is a VM cluster
+        l_VCN = l_database_client.get_vm_cluster ( l_item.resource_id ).data
+
+        # in case vm cluster exists get it's properties
+        if (l_VCN):
+          l_VCN_avail_domain = l_VCN.availability_domain
+          l_VCN_display_name = l_VCN.display_name
+          
+      # check for other resource types            
+      # elif l_item.resource_id.startswith("ocid1.pluggabledatabase"):
+        # if the resource_id is a pluggable database
+        # l_VCN = l_database_client.get_pluggable_database ( l_item.resource_id ).data
+
+        # print (l_VCN)
+      # else:
+        #print("Unknown resource type.")
+
+      if   "tqvm" in l_VCN_display_name: l_environment = "TEST" 
+      elif "pqvm" in l_VCN_display_name: l_environment = "PROD" 
+      else: l_environment = ""
+      
+      l_row = [
+        l_environment,
+        str ( l_item.time_usage_started ),
+        str ( l_item.time_usage_ended ),
+        l_item.resource_id,
+        l_VCN.availability_domain,
+        l_VCN.display_name,
+        l_item.service, 
+        l_item.sku_name,
+        l_item.sku_part_number,
+        str ( l_item.computed_amount ),
+        str ( l_item.computed_quantity ),
+        l_item.currency          
+      ]
+      
+      
+      #print ( l_row )
+
+      #l_FormattedRow = " | ".join ( l_cell.ljust ( col_widths[i] ) for i, l_cell in enumerate ( l_row ) )
+      l_FormattedRow = " | ".join (
+        ( l_cell if l_cell is not None else "" ).ljust ( col_widths[i] )
+          for i, l_cell in enumerate ( l_row )
+      )
+
+      l_arr_FormattedRows.append ( l_FormattedRow )
+
+
+    ### display  original data ###
+      #print ( p_UsageData )
+      #print ( l_FilteredData )
+
+    ### display formatted data ###
+    print ( l_arr_FormattedRows )
+
+##########################################################################
+# save file to ObjectStorage
+##########################################################################
+def fn_SaveFileToObjectStorage():
+# Save to Object Storage
+  object_storage_client = oci.object_storage.ObjectStorageClient(config={})
+  namespace = "your_namespace"  # Replace with your OCI Object Storage namespace
+  bucket_name = "your_bucket_name"  # Replace with your bucket name
+  object_name = "test.csv"
+
+# Convert CSV content to bytes
+  csv_bytes = "" # csv_content.encode('utf-8')
+
+# Upload the CSV file to the bucket
+  object_storage_client.put_object(
+      namespace_name=namespace,
+      bucket_name=bucket_name,
+      object_name=object_name,
+      put_object_body=csv_bytes
+  )
+
+##########################################################################
+# ObjectStorage manipulations - NOT WORKING
+##########################################################################
+def fn_ObjectStorageManipulations_test():
+  #region test Object Storage manipulations
+  '''
+  l_config = oci.config.from_file ( profile_name= "DEFAULT" )  # For primary tenant
+  #l_config = oci.config.from_file ( profile_name="REMOTE" )   # For remote tenant
+
+  l_object_storage_client = oci.object_storage.ObjectStorageClient ( l_config )
+
+  print ( str(l_object_storage_client) )
+
+  # Get the namespace
+  #l_namespace = l_object_storage_client.get_namespace().data
+  #print ( l_namespace )
+
+  #sys.exit()
+
+  # List buckets in the specified compartment
+  l_namespace = "fr5sgvqmsncb"
+  #l_compart_ocid = "ocid1.compartment.oc1..aaaaaaaaygvp3triltu7zfhno5eu5iks7dcj2yop3mtxfd6io7ifwncd43hq"  # compartment: MPR_Comp_VM_Lnx_Private
+  l_compart_ocid = "ocid1.tenancy.oc1..aaaaaaaagkhw5j4cxtlzb7c7g5efapzma4wdymyqaiij2ouuarg74cvruc2q"      # compartment: root
+
+  try:
+    l_arr_buckets = l_object_storage_client.list_buckets ( l_namespace, l_compart_ocid ) 
+    print (l_arr_buckets)
+
+    # Print bucket names
+    for l_bucket in l_arr_buckets.data: 
+      print(f'Bucket Name: { l_bucket.name}' )
+
+    # Print bucket names
+    for l_bucket in l_arr_buckets.data: 
+      print(f'Bucket Name: { l_bucket.name}' )
+
+  except oci.exceptions.ServiceError as e:
+    print(f'Error: {e.code} - {e.message}')
+  '''
+  #endregion
 
 
 ##########################################################################
@@ -875,7 +951,7 @@ def fn_Main():
 # Main Process
 ##########################################################################  
 
-  ()
+fn_Main()
 
 #fn_SendMail_SendGridApp()
 #fn_CommitCSVToGitHub()

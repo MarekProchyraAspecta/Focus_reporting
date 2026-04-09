@@ -45,7 +45,7 @@ Focus Reporting je Python batch aplikacia urcena na:
   - FROM: -ds 00:00  
   - TO: ( -de -1 ) 00:00
 
--csv: posli extrahovane a finalizovane data vo formate CSV mailom
+-csv: vystup generuj do csv ( v kode existuje aj moznost smerovat vystup na obrazovku, ale ta sa nepouziva )
 
 
 #### Aktualne Cron Jobs:
@@ -69,6 +69,11 @@ Focus Reporting je Python batch aplikacia urcena na:
 - Virtual env: `venv/`
 - Spúšťanie: cron
 
+hostname ???
+SSH key ???
+user
+tenant
+GH repo pristup: Jozef Vrana, Stanislav Samek, Filip Csupka
 
 
 ### 2.2 OCI Connectivity (FOCUS API)

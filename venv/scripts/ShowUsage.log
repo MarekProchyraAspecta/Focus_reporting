@@ -359,3 +359,21 @@ Committing changes with message: Add new CSV file to save subfolder
 Pushing changes to branch: master
 Process has finished successfully
 Exit status: 0
+Process has finished successfully
+Exit status: 0
+Process has finished successfully
+Exit status: 0
+REGULAR_WEEKLY
+True
+Extracting data for period: 2026-04-01 00:00:00 - 2026-04-06 00:00:00
+Fetching data from 2026-04-01 00:00:00 to 2026-04-02 12:00:00
+Fetching data from 2026-04-02 12:00:00 to 2026-04-04 00:00:00
+Fetching data from 2026-04-04 00:00:00 to 2026-04-05 12:00:00
+Fetching data from 2026-04-05 12:00:00 to 2026-04-06 00:00:00
+Usage data for requested days is extracted
+SSH agent started and key added successfully from /home/opc/.ssh/aspecta_git
+Adding CSV file /home/opc/python_projects/focus_reporting/save/usage_hourly_2026_04.csv to the staging area...
+Committing changes with message: Add new CSV file to save subfolder
+Pushing changes to branch: master
+Process has finished successfully
+Exit status: 0
